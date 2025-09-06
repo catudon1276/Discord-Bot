@@ -36,7 +36,6 @@ LOCALIZED_STRINGS = {
         'help_lang_example': "・**書式**: `/dice lang [言語コード]`",
         'critical': " ✨クリティカル！",
         'fumble': " 💀ファンブル！",
-        'error_editing': "メッセージの編集中にエラーが発生しました: {}",
         'error_message': "エラーが発生しました。",
         'lang_en_success': "言語設定を英語に変更しました。",
         'lang_ja_success': "言語設定を日本語に変更しました。"
@@ -59,7 +58,6 @@ LOCALIZED_STRINGS = {
         'help_lang_example': "- **Format**: `/dice lang [language code]`",
         'critical': " ✨ Critical!",
         'fumble': " 💀 Fumble!",
-        'error_editing': "Error editing message: {}",
         'error_message': "An error occurred.",
         'lang_en_success': "Language has been set to English.",
         'lang_ja_success': "Language has been set to Japanese."
@@ -67,17 +65,14 @@ LOCALIZED_STRINGS = {
 }
 
 def get_localized_text(user_id, key):
-    """Returns the localized string for a given user and key."""
     lang = user_languages.get(user_id, 'ja')
     return LOCALIZED_STRINGS[lang].get(key, 'Error: Text not found')
 
 def roll_dice(dice_count, dice_sides):
-    """Rolls the specified number of dice and returns the results."""
     return [random.randint(1, dice_sides) for _ in range(dice_count)]
 
 @client.event
 async def on_ready():
-    # ログイン通知を削除
     pass
 
 @client.event
@@ -85,10 +80,10 @@ async def on_message(message):
     if message.author.bot:
         return
 
-    content = message.content # Keep the original case and spacing for replacement
+    content = message.content
     user_id = message.author.id
 
-    # Check for language commands first
+    # 言語設定コマンド
     if content.lower().strip() == '/dice lang en':
         user_languages[user_id] = 'en'
         await message.channel.send(get_localized_text(user_id, 'lang_en_success'))
@@ -98,11 +93,9 @@ async def on_message(message):
         await message.channel.send(get_localized_text(user_id, 'lang_ja_success'))
         return
 
-    # 1. Handle the '/help dice' command
+    # /help dice コマンド
     if content.lower().strip() == '/help dice':
-        lang = user_languages.get(user_id, 'ja')
         help_message = f"""
-
 {get_localized_text(user_id, 'help_title')}
 
 {get_localized_text(user_id, 'help_intro')}
@@ -124,62 +117,46 @@ async def on_message(message):
 {get_localized_text(user_id, 'help_lang_desc')}
 {get_localized_text(user_id, 'help_lang_example')}
 """
-        await message.reply(help_message)
-        return
-    
-    # Check for messages starting with a single quote to ignore them
-    if content.startswith(('\'', '’')):
+        await message.channel.send(help_message)
         return
 
-    # Check if the expression contains operators (+, -, *, /, ×, ÷)
+    # 先頭が ' または ’ の場合は無視
+    if content.startswith(("'", "’")):
+        return
+
     has_operator = re.search(r"[+\-*/×÷]", content)
-    
-    dice_matches = re.finditer(r"(\d*)[dD](\d+)", content)
-    
+    dice_matches = list(re.finditer(r"(\d*)[dD](\d+)", content))
     if dice_matches:
-        original_content = content
         replacements = []
         expression_values = {}
-        
-        # First pass: Roll all the dice and get their results and values
-        for i, match in enumerate(re.finditer(r"(\d*)[dD](\d+)", original_content)):
+        for i, match in enumerate(dice_matches):
             dice_count = int(match.group(1) or 1)
             dice_sides = int(match.group(2))
-            
             if dice_count > 100 or dice_sides > 10000:
                 continue
-
             results = roll_dice(dice_count, dice_sides)
             total = sum(results)
-            
-            # Format the output string for this specific dice roll based on whether there is an operator or not
             if has_operator:
                 result_str = f"[{total}]"
             elif dice_count > 10:
                 result_str = f"({total})"
             else:
                 result_str = f"({', '.join(map(str, results))})"
-
             replacements.append((match.start(), match.end(), f"{match.group()}{result_str}"))
             expression_values[f"d{i}"] = total
-            
-        # Second pass: Replace the dice rolls with their results in the original content
-        modified_content = original_content
+
+        modified_content = content
         for start, end, repl_text in reversed(replacements):
             modified_content = modified_content[:start] + repl_text + modified_content[end:]
-        
-        # Evaluate the full expression to get the final total
-        expression_to_eval = original_content.replace('×', '*').replace('÷', '/')
-        for i, match in enumerate(re.finditer(r"(\d*)[dD](\d+)", original_content)):
+
+        expression_to_eval = content.replace('×', '*').replace('÷', '/')
+        for i, match in enumerate(dice_matches):
             expression_to_eval = expression_to_eval.replace(match.group(), f"d{i}", 1)
 
         final_total = eval(expression_to_eval, {}, expression_values)
-        
-        # Append the final total to the modified content
         final_message = f"{modified_content} = [{final_total}]"
-        
-        # Check for d100 critical/fumble on the first dice roll if there are no operators
-        is_simple_d100 = re.fullmatch(r"(\d*)[dD]100", original_content.strip())
+
+        is_simple_d100 = re.fullmatch(r"(\d*)[dD]100", content.strip())
         if not has_operator and is_simple_d100 and len(replacements) == 1:
             first_dice_count = int(is_simple_d100.group(1) or 1)
             if first_dice_count == 1:
@@ -189,11 +166,7 @@ async def on_message(message):
                 elif first_roll_value == 1:
                     final_message += get_localized_text(user_id, 'fumble')
 
-        try:
-            await message.edit(content=final_message)
-        except Exception as e:
-            print(get_localized_text(user_id, 'error_editing').format(e))
-            await message.channel.send(get_localized_text(user_id, 'error_message'))
+        await message.channel.send(final_message)
 
-# Start the bot 
+# Start the bot
 client.run(TOKEN)
